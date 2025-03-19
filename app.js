@@ -1,4 +1,4 @@
-// app.js - Complete updated version with improved horizontal data support
+// app.js - Modified for direct date headers
 const express = require('express');
 const cors = require('cors');
 const { google } = require('googleapis');
@@ -15,7 +15,7 @@ const API_KEY = process.env.GOOGLE_API_KEY;
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 
 app.use(cors({
-  origin: '*', // Allow all origins for testing, restrict this in production
+  origin: '*', 
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
@@ -25,7 +25,7 @@ app.get('/', (req, res) => {
   res.json({ status: 'API is running' });
 });
 
-// Add a test endpoint to help with debugging
+// Test endpoint
 app.get('/test', async (req, res) => {
   try {
     res.json({ 
@@ -92,242 +92,7 @@ app.get('/api/student/:rollNumber', async (req, res) => {
   }
 });
 
-// Endpoint to get attendance data with improved column detection
-app.get('/api/student/:rollNumber/attendance', async (req, res) => {
-  try {
-    const sheets = google.sheets({ version: 'v4' });
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SHEET_ID,
-      range: 'Attendance!A:Z',
-      key: API_KEY
-    });
-    
-    if (!response.data.values || response.data.values.length <= 1) {
-      return res.status(404).json({ success: false, message: 'No attendance data found in the sheet' });
-    }
-    
-    // Assuming first row has column headers
-    const headerRow = response.data.values[0];
-    
-    // Find roll number column index (typically first column)
-    const rollIndex = headerRow.findIndex(header => 
-      header && header.toString().toLowerCase().includes('roll') || 
-      (header && header.toString().toLowerCase().includes('admission')) || 
-      (header && header.toString().toLowerCase().includes('id')));
-    
-    if (rollIndex === -1) {
-      return res.status(400).json({ success: false, message: 'Roll Number column not found' });
-    }
-    
-    // Find the student row with the matching roll number
-    const studentRow = response.data.values.find(row => row[rollIndex] === req.params.rollNumber);
-    
-    if (!studentRow) {
-      return res.status(404).json({ success: false, message: 'No attendance records found for this student' });
-    }
-    
-    // Extract date columns with improved detection for numbered headers
-    const dateColumnGroups = [];
-    
-    // Better date column detection that handles numbered headers
-    for (let i = rollIndex + 1; i < headerRow.length; i++) {
-      const headerText = headerRow[i] ? headerRow[i].toString().toLowerCase() : '';
-      
-      // Check if this column is a date column (looks for "date" in header or is date-like)
-      if (headerText.includes('date') || isDateLike(headerRow[i])) {
-        // Try to find corresponding status and time columns
-        let statusCol = -1;
-        let timeCol = -1;
-        
-        // Look for status column (either next column or by name)
-        for (let j = i + 1; j < Math.min(i + 4, headerRow.length); j++) {
-          const colHeader = headerRow[j] ? headerRow[j].toString().toLowerCase() : '';
-          if (colHeader.includes('status') || colHeader.includes('present') || colHeader.includes('absent')) {
-            statusCol = j;
-            break;
-          }
-        }
-        
-        // If status column not found by name, assume it's the next column
-        if (statusCol === -1 && i + 1 < headerRow.length) {
-          statusCol = i + 1;
-        }
-        
-        // Look for time column (either after status or by name)
-        if (statusCol !== -1) {
-          for (let j = statusCol + 1; j < Math.min(statusCol + 3, headerRow.length); j++) {
-            const colHeader = headerRow[j] ? headerRow[j].toString().toLowerCase() : '';
-            if (colHeader.includes('time') || colHeader.includes('late')) {
-              timeCol = j;
-              break;
-            }
-          }
-          
-          // If time column not found by name, assume it's the next column after status
-          if (timeCol === -1 && statusCol + 1 < headerRow.length) {
-            timeCol = statusCol + 1;
-          }
-        }
-        
-        // Only add if we found a valid group
-        if (statusCol !== -1) {
-          dateColumnGroups.push({
-            dateCol: i,
-            statusCol: statusCol,
-            timeCol: timeCol !== -1 ? timeCol : statusCol + 1 // Default to next column if not found
-          });
-          
-          // Skip to after this group
-          i = timeCol !== -1 ? timeCol : statusCol;
-        }
-      }
-    }
-    
-    // Add debug logging to see what columns were detected
-    console.log("Detected date column groups:", dateColumnGroups.map(g => ({
-      date: headerRow[g.dateCol],
-      status: headerRow[g.statusCol],
-      time: g.timeCol < headerRow.length ? headerRow[g.timeCol] : "N/A"
-    })));
-    
-    if (dateColumnGroups.length === 0) {
-      return res.status(400).json({ success: false, message: 'No date columns found in attendance sheet' });
-    }
-    
-    // Process attendance data by month
-    const attendanceByMonth = {};
-    let totalSchoolDays = 0;
-    let totalPresent = 0;
-    
-    dateColumnGroups.forEach(group => {
-      const dateStr = headerRow[group.dateCol];
-      const statusValue = studentRow[group.statusCol] ? studentRow[group.statusCol].toString().toLowerCase() : '';
-      const timeValue = group.timeCol < studentRow.length ? studentRow[group.timeCol] : '';
-      
-      if (!dateStr) return;
-      
-      // Parse date from format DD/MM/YYYY or MM/DD/YYYY
-      let date = parseDate(dateStr);
-      
-      if (!date || isNaN(date.getTime())) return; // Skip invalid dates
-      
-      const month = date.getMonth();
-      const year = date.getFullYear();
-      const day = date.getDate();
-      
-      // Create month entry if it doesn't exist
-      const monthKey = `${month}-${year}`;
-      if (!attendanceByMonth[monthKey]) {
-        attendanceByMonth[monthKey] = {
-          month,
-          year,
-          totalDays: 0,
-          daysPresent: 0,
-          daysAbsent: 0,
-          percentage: 0,
-          days: []
-        };
-      }
-      
-      // Parse status
-      const isPresent = statusValue.includes('p') || statusValue.includes('present') || statusValue === '1';
-      
-      // Parse time status
-      let timeStatus = '';
-      if (timeValue) {
-        if (timeValue.toString().toLowerCase().includes('late') || 
-            timeValue.toString().toLowerCase().includes('delay')) {
-          timeStatus = 'late';
-        } else if (isPresent) {
-          timeStatus = 'on-time';
-        }
-      } else if (isPresent) {
-        timeStatus = 'on-time'; // Default for present students
-      }
-      
-      // Add day to month
-      attendanceByMonth[monthKey].days.push({
-        day,
-        isSchoolDay: true,
-        status: isPresent ? 'present' : 'absent',
-        timeStatus
-      });
-      
-      // Update monthly counters
-      attendanceByMonth[monthKey].totalDays++;
-      if (isPresent) {
-        attendanceByMonth[monthKey].daysPresent++;
-      } else {
-        attendanceByMonth[monthKey].daysAbsent++;
-      }
-      
-      // Update yearly counters
-      totalSchoolDays++;
-      if (isPresent) totalPresent++;
-    });
-    
-    // Calculate percentages and format months as array
-    const months = Object.values(attendanceByMonth).map(month => {
-      if (month.totalDays > 0) {
-        month.percentage = ((month.daysPresent / month.totalDays) * 100).toFixed(1);
-      }
-      return month;
-    });
-    
-    // Fill in weekend days (Sundays) and missing days as holidays
-    months.forEach(month => {
-      const daysInMonth = new Date(month.year, month.month + 1, 0).getDate();
-      
-      // Create a map for quick lookup of existing days
-      const existingDays = {};
-      month.days.forEach(day => {
-        existingDays[day.day] = true;
-      });
-      
-      // Add missing days (weekends and holidays)
-      for (let day = 1; day <= daysInMonth; day++) {
-        if (!existingDays[day]) {
-          const date = new Date(month.year, month.month, day);
-          const dayOfWeek = date.getDay();
-          const isSunday = dayOfWeek === 0;
-          
-          month.days.push({
-            day,
-            isSchoolDay: false,
-            status: 'no-school',
-            timeStatus: '',
-            isWeekend: isSunday,
-            isSunday: isSunday,
-            isHoliday: !isSunday // If not Sunday, and not in data, mark as holiday
-          });
-        }
-      }
-      
-      // Sort days numerically
-      month.days.sort((a, b) => a.day - b.day);
-    });
-    
-    // Create full attendance data object
-    const attendanceData = {
-      attendance: {
-        yearToDate: {
-          totalDays: totalSchoolDays,
-          daysPresent: totalPresent,
-          daysAbsent: totalSchoolDays - totalPresent,
-          percentage: totalSchoolDays > 0 ? ((totalPresent / totalSchoolDays) * 100).toFixed(1) : 0
-        },
-        months
-      }
-    };
-    
-    res.json({ success: true, data: attendanceData });
-  } catch (error) {
-    console.error('Error fetching attendance data:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Combines both endpoints for a single request option
+// Combined endpoint for student and attendance data
 app.get('/api/student/:rollNumber/combined', async (req, res) => {
   try {
     // Get student info
@@ -372,7 +137,7 @@ app.get('/api/student/:rollNumber/combined', async (req, res) => {
       motherName: studentRow[studentHeaders.findIndex(h => h.toLowerCase().includes('mother'))] || 'N/A'
     };
     
-    // Now get attendance data using the new horizontal format
+    // Now get attendance data
     const attendanceResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SHEET_ID,
       range: 'Attendance!A:Z',
@@ -393,7 +158,7 @@ app.get('/api/student/:rollNumber/combined', async (req, res) => {
     };
     
     if (attendanceResponse.data.values && attendanceResponse.data.values.length > 1) {
-      // Process the horizontal attendance data
+      // Process attendance data
       const headerRow = attendanceResponse.data.values[0];
       
       // Find roll number column
@@ -408,83 +173,38 @@ app.get('/api/student/:rollNumber/combined', async (req, res) => {
           row[attendanceRollIndex] === req.params.rollNumber);
         
         if (studentAttendanceRow) {
-          // Extract date columns with improved detection for numbered headers
-          const dateColumnGroups = [];
+          // Find date columns - looking for actual dates in headers
+          const dateColumns = [];
           
-          // Better date column detection that handles numbered headers
-          for (let i = attendanceRollIndex + 1; i < headerRow.length; i++) {
-            const headerText = headerRow[i] ? headerRow[i].toString().toLowerCase() : '';
+          for (let i = 0; i < headerRow.length; i++) {
+            const headerText = headerRow[i] ? headerRow[i].toString() : '';
+            // Skip the roll number column
+            if (i === attendanceRollIndex) continue;
             
-            // Check if this column is a date column (looks for "date" in header or is date-like)
-            if (headerText.includes('date') || isDateLike(headerRow[i])) {
-              // Try to find corresponding status and time columns
-              let statusCol = -1;
-              let timeCol = -1;
-              
-              // Look for status column (either next column or by name)
-              for (let j = i + 1; j < Math.min(i + 4, headerRow.length); j++) {
-                const colHeader = headerRow[j] ? headerRow[j].toString().toLowerCase() : '';
-                if (colHeader.includes('status') || colHeader.includes('present') || colHeader.includes('absent')) {
-                  statusCol = j;
-                  break;
-                }
-              }
-              
-              // If status column not found by name, assume it's the next column
-              if (statusCol === -1 && i + 1 < headerRow.length) {
-                statusCol = i + 1;
-              }
-              
-              // Look for time column (either after status or by name)
-              if (statusCol !== -1) {
-                for (let j = statusCol + 1; j < Math.min(statusCol + 3, headerRow.length); j++) {
-                  const colHeader = headerRow[j] ? headerRow[j].toString().toLowerCase() : '';
-                  if (colHeader.includes('time') || colHeader.includes('late')) {
-                    timeCol = j;
-                    break;
-                  }
-                }
-                
-                // If time column not found by name, assume it's the next column after status
-                if (timeCol === -1 && statusCol + 1 < headerRow.length) {
-                  timeCol = statusCol + 1;
-                }
-              }
-              
-              // Only add if we found a valid group
-              if (statusCol !== -1) {
-                dateColumnGroups.push({
-                  dateCol: i,
-                  statusCol: statusCol,
-                  timeCol: timeCol !== -1 ? timeCol : statusCol + 1 // Default to next column if not found
-                });
-                
-                // Skip to after this group
-                i = timeCol !== -1 ? timeCol : statusCol;
-              }
+            // Check if this column header is a date
+            if (isDateString(headerText)) {
+              dateColumns.push(i);
             }
           }
           
-          // Add debug logging to see what columns were detected
-          console.log("Detected date column groups:", dateColumnGroups.map(g => ({
-            date: headerRow[g.dateCol],
-            status: headerRow[g.statusCol],
-            time: g.timeCol < headerRow.length ? headerRow[g.timeCol] : "N/A"
-          })));
+          console.log("Detected date columns:", dateColumns.map(col => headerRow[col]));
           
           // Process attendance data by month
           const attendanceByMonth = {};
           let totalSchoolDays = 0;
           let totalPresent = 0;
           
-          dateColumnGroups.forEach(group => {
-            const dateStr = headerRow[group.dateCol];
-            const statusValue = studentAttendanceRow[group.statusCol] ? studentAttendanceRow[group.statusCol].toString().toLowerCase() : '';
-            const timeValue = group.timeCol < studentAttendanceRow.length ? studentAttendanceRow[group.timeCol] : '';
+          dateColumns.forEach(col => {
+            const dateStr = headerRow[col];
+            const statusValue = studentAttendanceRow[col] ? studentAttendanceRow[col].toString().toLowerCase() : '';
+            
+            // Check for time value - assume it's in the next column if available
+            const timeValue = (col + 1 < studentAttendanceRow.length) ? 
+                             studentAttendanceRow[col + 1] : '';
             
             if (!dateStr) return;
             
-            // Parse date from format DD/MM/YYYY or MM/DD/YYYY
+            // Parse date
             let date = parseDate(dateStr);
             
             if (!date || isNaN(date.getTime())) return; // Skip invalid dates
@@ -507,14 +227,14 @@ app.get('/api/student/:rollNumber/combined', async (req, res) => {
               };
             }
             
-            // Parse status
-            const isPresent = statusValue.includes('p') || statusValue.includes('present') || statusValue === '1';
+            // Parse status - treat any variation of "present" as present
+            const isPresent = statusValue.includes('p') || statusValue === '1';
             
             // Parse time status
             let timeStatus = '';
             if (timeValue) {
               if (timeValue.toString().toLowerCase().includes('late') || 
-                  timeValue.toString().toLowerCase().includes('delay')) {
+                  timeValue.toString().toLowerCase().includes('came')) {
                 timeStatus = 'late';
               } else if (isPresent) {
                 timeStatus = 'on-time';
@@ -616,23 +336,17 @@ app.get('/api/student/:rollNumber/combined', async (req, res) => {
 });
 
 // Helper function to check if a string is a date
-function isDateLike(str) {
+function isDateString(str) {
   if (!str) return false;
   
-  // If it's a header with "date" in it, consider it a date column
-  if (typeof str === 'string' && str.toLowerCase().includes('date')) {
-    return true;
-  }
-  
   // Convert to string if not already
-  const dateStr = str.toString();
+  const dateStr = str.toString().trim();
   
   // Check for DD/MM/YYYY or MM/DD/YYYY format
   if (dateStr.includes('/')) {
     const parts = dateStr.split('/');
     if (parts.length === 3) {
-      // Check if all parts are numbers
-      return parts.every(part => !isNaN(parseInt(part)));
+      return true;
     }
   }
   
@@ -640,12 +354,11 @@ function isDateLike(str) {
   if (dateStr.includes('-')) {
     const parts = dateStr.split('-');
     if (parts.length === 3) {
-      // Check if all parts are numbers
-      return parts.every(part => !isNaN(parseInt(part)));
+      return true;
     }
   }
   
-  // Try date parsing as a last resort
+  // Try direct date parsing
   try {
     const date = new Date(dateStr);
     return !isNaN(date.getTime());
@@ -659,7 +372,7 @@ function parseDate(dateStr) {
   if (!dateStr) return null;
   
   // Convert to string if it's not already
-  const str = dateStr.toString();
+  const str = dateStr.toString().trim();
   
   // Try DD/MM/YYYY format
   if (str.includes('/')) {
