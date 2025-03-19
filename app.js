@@ -75,11 +75,19 @@ app.get('/api/student/:rollNumber', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Student not found' });
     }
     
+    // Find school column index
+    const schoolIndex = headers.findIndex(h => 
+      h.toLowerCase() === 'school' || 
+      h.toLowerCase() === 'school name' || 
+      h.toLowerCase() === 'institution' || 
+      h.toLowerCase() === 'school_name'
+    );
+    
     // Map student data
     const student = {
       name: studentRow[headers.findIndex(h => h.toLowerCase().includes('name') && !h.toLowerCase().includes('father') && !h.toLowerCase().includes('mother'))] || 'N/A',
       class: studentRow[headers.findIndex(h => h.toLowerCase().includes('class'))] || 'N/A',
-      School: 'KENDRIYA VIDYALAYA SANGTHAN', // Can be dynamically set if needed
+      School: schoolIndex !== -1 && studentRow[schoolIndex] ? studentRow[schoolIndex] : 'KENDRIYA VIDYALAYA SANGTHAN',
       dob: studentRow[headers.findIndex(h => h.toLowerCase().includes('dob') || h.toLowerCase().includes('birth'))] || 'N/A',
       fatherName: studentRow[headers.findIndex(h => h.toLowerCase().includes('father'))] || 'N/A',
       motherName: studentRow[headers.findIndex(h => h.toLowerCase().includes('mother'))] || 'N/A'
@@ -127,11 +135,19 @@ app.get('/api/student/:rollNumber/combined', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Student not found' });
     }
     
+    // Find school column index
+    const schoolIndex = studentHeaders.findIndex(h => 
+      h.toLowerCase() === 'school' || 
+      h.toLowerCase() === 'school name' || 
+      h.toLowerCase() === 'institution' || 
+      h.toLowerCase() === 'school_name'
+    );
+    
     // Map student data
     const student = {
       name: studentRow[studentHeaders.findIndex(h => h.toLowerCase().includes('name') && !h.toLowerCase().includes('father') && !h.toLowerCase().includes('mother'))] || 'N/A',
       class: studentRow[studentHeaders.findIndex(h => h.toLowerCase().includes('class'))] || 'N/A',
-      School: 'KENDRIYA VIDYALAYA SANGTHAN', // Can be dynamically set if needed
+      School: schoolIndex !== -1 && studentRow[schoolIndex] ? studentRow[schoolIndex] : 'KENDRIYA VIDYALAYA SANGTHAN',
       dob: studentRow[studentHeaders.findIndex(h => h.toLowerCase().includes('dob') || h.toLowerCase().includes('birth'))] || 'N/A',
       fatherName: studentRow[studentHeaders.findIndex(h => h.toLowerCase().includes('father'))] || 'N/A',
       motherName: studentRow[studentHeaders.findIndex(h => h.toLowerCase().includes('mother'))] || 'N/A'
