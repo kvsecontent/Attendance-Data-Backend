@@ -156,7 +156,7 @@ app.get('/api/student/:rollNumber/combined', async (req, res) => {
     // Now get attendance data - EXPANDED RANGE TO INCLUDE MORE COLUMNS
     const attendanceResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SHEET_ID,
-      range: 'Attendance!A:AZ', // Changed from A:Z to A:AZ to include more columns
+      range: 'Attendance!A:ZZ', // Changed from A:Z to A:ZZ to include more columns
       key: API_KEY
     });
     
