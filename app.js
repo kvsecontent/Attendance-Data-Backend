@@ -153,10 +153,10 @@ app.get('/api/student/:rollNumber/combined', async (req, res) => {
       motherName: studentRow[studentHeaders.findIndex(h => h.toLowerCase().includes('mother'))] || 'N/A'
     };
     
-    // Now get attendance data
+    // Now get attendance data - EXPANDED RANGE TO INCLUDE MORE COLUMNS
     const attendanceResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SHEET_ID,
-      range: 'Attendance!A:Z',
+      range: 'Attendance!A:AZ', // Changed from A:Z to A:AZ to include more columns
       key: API_KEY
     });
     
@@ -243,41 +243,73 @@ app.get('/api/student/:rollNumber/combined', async (req, res) => {
               };
             }
             
-            // Parse status - treat any variation of "present" as present
-            const isPresent = statusValue.includes('p') || statusValue === '1';
+            // Check if the value indicates Sunday or Holiday
+            const isSunday = statusValue.includes('sun') || statusValue === 's';
+            const isHoliday = statusValue.includes('hol') || statusValue === 'h';
             
-            // Parse time status
-            let timeStatus = '';
-            if (timeValue) {
-              if (timeValue.toString().toLowerCase().includes('late') || 
-                  timeValue.toString().toLowerCase().includes('came')) {
-                timeStatus = 'late';
+            if (isSunday) {
+              // Add as Sunday
+              attendanceByMonth[monthKey].days.push({
+                day,
+                isSchoolDay: false,
+                status: 'sunday',
+                timeStatus: '',
+                isSunday: true,
+                isHoliday: false
+              });
+              
+              // Don't update attendance counters for Sundays
+            } 
+            else if (isHoliday) {
+              // Add as Holiday
+              attendanceByMonth[monthKey].days.push({
+                day,
+                isSchoolDay: false,
+                status: 'holiday',
+                timeStatus: '',
+                isSunday: false,
+                isHoliday: true
+              });
+              
+              // Don't update attendance counters for Holidays
+            } 
+            else {
+              // Parse status - treat any variation of "present" as present
+              const isPresent = statusValue.includes('p') || statusValue === '1';
+              
+              // Parse time status
+              let timeStatus = '';
+              if (timeValue) {
+                if (timeValue.toString().toLowerCase().includes('late') || 
+                    timeValue.toString().toLowerCase().includes('came')) {
+                  timeStatus = 'late';
+                } else if (isPresent) {
+                  timeStatus = 'on-time';
+                }
               } else if (isPresent) {
-                timeStatus = 'on-time';
+                timeStatus = 'on-time'; // Default for present students
               }
-            } else if (isPresent) {
-              timeStatus = 'on-time'; // Default for present students
+              
+              // Add day to month
+              attendanceByMonth[monthKey].days.push({
+                day,
+                isSchoolDay: true,
+                status: isPresent ? 'present' : 'absent',
+                timeStatus
+              });
+              
+              // Update monthly counters
+              attendanceByMonth[monthKey].totalDays++;
+              if (isPresent) {
+                attendanceByMonth[monthKey].daysPresent++;
+              } else {
+                attendanceByMonth[monthKey].daysAbsent++;
+              }
+              
+              // Update yearly counters
+              totalSchoolDays++;
+              if (isPresent) totalPresent++;
             }
-            
-            // Add day to month
-            attendanceByMonth[monthKey].days.push({
-              day,
-              isSchoolDay: true,
-              status: isPresent ? 'present' : 'absent',
-              timeStatus
-            });
-            
-            // Update monthly counters
-            attendanceByMonth[monthKey].totalDays++;
-            if (isPresent) {
-              attendanceByMonth[monthKey].daysPresent++;
-            } else {
-              attendanceByMonth[monthKey].daysAbsent++;
-            }
-            
-            // Update yearly counters
-            totalSchoolDays++;
-            if (isPresent) totalPresent++;
           });
           
           // Calculate percentages and format months as array
@@ -308,7 +340,7 @@ app.get('/api/student/:rollNumber/combined', async (req, res) => {
                 month.days.push({
                   day,
                   isSchoolDay: false,
-                  status: 'no-school',
+                  status: isSunday ? 'sunday' : 'no-school',
                   timeStatus: '',
                   isWeekend: isSunday,
                   isSunday: isSunday,
