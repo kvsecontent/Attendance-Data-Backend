@@ -169,7 +169,8 @@ app.get('/api/student/:rollNumber/combined', async (req, res) => {
           daysAbsent: 0,
           percentage: 0
         },
-        months: []
+        months: [],
+        academicYear: "2024-25" // Default academic year
       }
     };
     
@@ -209,9 +210,11 @@ app.get('/api/student/:rollNumber/combined', async (req, res) => {
           const attendanceByMonth = {};
           let totalSchoolDays = 0;
           let totalPresent = 0;
+          let latestDate = null;
           
           dateColumns.forEach(col => {
             const dateStr = headerRow[col];
+            // Get status value, if empty or undefined, treat as non-school day
             const statusValue = studentAttendanceRow[col] ? studentAttendanceRow[col].toString().toLowerCase() : '';
             
             // Check for time value - assume it's in the next column if available
@@ -224,6 +227,11 @@ app.get('/api/student/:rollNumber/combined', async (req, res) => {
             let date = parseDate(dateStr);
             
             if (!date || isNaN(date.getTime())) return; // Skip invalid dates
+            
+            // Keep track of the latest date for academic year calculation
+            if (!latestDate || date > latestDate) {
+              latestDate = date;
+            }
             
             const month = date.getMonth();
             const year = date.getFullYear();
@@ -247,7 +255,19 @@ app.get('/api/student/:rollNumber/combined', async (req, res) => {
             const isSunday = statusValue.includes('sun') || statusValue === 's';
             const isHoliday = statusValue.includes('hol') || statusValue === 'h';
             
-            if (isSunday) {
+            // If value is blank/empty, treat as holiday
+            if (!statusValue || statusValue.trim() === '') {
+              attendanceByMonth[monthKey].days.push({
+                day,
+                isSchoolDay: false,
+                status: 'no-school',
+                timeStatus: '',
+                isSunday: false,
+                isHoliday: true
+              });
+              // Don't update attendance counters for non-school days
+            }
+            else if (isSunday) {
               // Add as Sunday
               attendanceByMonth[monthKey].days.push({
                 day,
@@ -353,6 +373,19 @@ app.get('/api/student/:rollNumber/combined', async (req, res) => {
             month.days.sort((a, b) => a.day - b.day);
           });
           
+          // Determine academic year based on latest month data
+          // If latest month is April or later, use YYYY-(YYYY+1), otherwise use (YYYY-1)-YYYY
+          let academicYear = "2024-25"; // Default
+          if (latestDate) {
+            const month = latestDate.getMonth(); // 0 for Jan, 3 for April
+            const year = latestDate.getFullYear();
+            if (month >= 3) { // April (index 3) or later
+              academicYear = `${year}-${(year + 1).toString().substr(2, 2)}`;
+            } else {
+              academicYear = `${year - 1}-${year.toString().substr(2, 2)}`;
+            }
+          }
+          
           // Create full attendance data object
           attendanceData = {
             attendance: {
@@ -362,7 +395,8 @@ app.get('/api/student/:rollNumber/combined', async (req, res) => {
                 daysAbsent: totalSchoolDays - totalPresent,
                 percentage: totalSchoolDays > 0 ? ((totalPresent / totalSchoolDays) * 100).toFixed(1) : 0
               },
-              months
+              months,
+              academicYear
             }
           };
         }
