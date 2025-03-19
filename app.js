@@ -255,15 +255,21 @@ app.get('/api/student/:rollNumber/combined', async (req, res) => {
             const isSunday = statusValue.includes('sun') || statusValue === 's';
             const isHoliday = statusValue.includes('hol') || statusValue === 'h';
             
-            // If value is blank/empty, treat as holiday
+            // Get day of week name for blank fields
+            const dayOfWeek = date.getDay();
+            const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+            const dayName = dayNames[dayOfWeek];
+            
+            // If value is blank/empty, show the day of the week
             if (!statusValue || statusValue.trim() === '') {
               attendanceByMonth[monthKey].days.push({
                 day,
                 isSchoolDay: false,
-                status: 'no-school',
+                status: 'day-of-week', // Special status for day of week
+                dayName: dayName, // The actual day name (e.g., "Tuesday")
                 timeStatus: '',
-                isSunday: false,
-                isHoliday: true
+                isSunday: dayOfWeek === 0,
+                isHoliday: false
               });
               // Don't update attendance counters for non-school days
             }
