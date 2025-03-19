@@ -79,7 +79,7 @@ app.get('/api/student/:rollNumber', async (req, res) => {
     const student = {
       name: studentRow[headers.findIndex(h => h.toLowerCase().includes('name') && !h.toLowerCase().includes('father') && !h.toLowerCase().includes('mother'))] || 'N/A',
       class: studentRow[headers.findIndex(h => h.toLowerCase().includes('class'))] || 'N/A',
-      school: 'Kendriya Vidyalaya', // Can be dynamically set if needed
+      school: 'KENDRIYA VIDYALAYA SANGTHAN', // Can be dynamically set if needed
       dob: studentRow[headers.findIndex(h => h.toLowerCase().includes('dob') || h.toLowerCase().includes('birth'))] || 'N/A',
       fatherName: studentRow[headers.findIndex(h => h.toLowerCase().includes('father'))] || 'N/A',
       motherName: studentRow[headers.findIndex(h => h.toLowerCase().includes('mother'))] || 'N/A'
